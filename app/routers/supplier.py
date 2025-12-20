@@ -71,6 +71,6 @@ def read_supplier_shipments(supplier_id: int, db: Session = Depends(get_db)):
     supplier = db.query(Supplier).filter(Supplier.supplier_id == supplier_id).first()
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
-    # Shipments are linked to Orders, which are linked to Suppliers
+    
     shipments = db.query(Shipment).join(Order).filter(Order.supplier_id == supplier_id).all()
     return shipments

@@ -15,7 +15,6 @@ def create_order(order: Ordercreate, db: Session = Depends(get_db)):
     if not check_stock_availabilty(order.product_id, order.quantity_ordered, db):
         raise HTTPException(status_code=400, detail="Insufficient stock available")
     
-    # Reduce stock
     product = db.query(Product).filter(Product.product_id == order.product_id).first()
     product.quantity_available -= order.quantity_ordered
     
@@ -63,12 +62,10 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
     if db_order is None:
         raise HTTPException(status_code=404, detail="Order not found")
     
-    # Check if order is delivered
     shipment = db.query(Shipment).filter(Shipment.order_id == order_id).first()
     if shipment and shipment.status == "Delivered":
         raise HTTPException(status_code=400, detail="Cannot cancel order that has been delivered")
     
-    # Restore stock
     product = db.query(Product).filter(Product.product_id == db_order.product_id).first()
     if product:
         product.quantity_available += db_order.quantity_ordered
