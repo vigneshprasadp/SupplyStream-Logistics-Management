@@ -278,6 +278,8 @@ elif menu == "Suppliers":
                 phone = st.text_input("Phone Number", placeholder="e.g. +1 234 567 890")
                 address = st.text_input("Address", placeholder="Full business address")
             
+            min_cap = st.number_input("Min Capacity (Units)", min_value=0.0, value=50.0, step=10.0)
+            
             submitted = st.form_submit_button("🏭 Add Supplier")
             
             if submitted:
@@ -288,7 +290,8 @@ elif menu == "Suppliers":
                         "name": name,
                         "address": address,
                         "contact_person": contact,
-                        "phone_number": phone
+                        "phone_number": phone,
+                        "min_capacity": min_cap
                     }
                     res = send_data("suppliers/", payload)
                     if res and res.status_code == 200:
@@ -375,10 +378,15 @@ elif menu == "Products":
             c1, c2 = st.columns(2)
             with c1:
                 name = st.text_input("Product Name", placeholder="e.g. Wireless Mouse")
-                unit_price = st.number_input("Unit Price ($)", min_value=0.0, step=0.01)
             with c2:
                 quantity = st.number_input("Quantity Available", min_value=0, step=1)
+                unit_price = st.number_input("Unit Price ($)", min_value=0.0, step=0.01)
+            
+            c3, c4 = st.columns(2)
+            with c3:
                 description = st.text_input("Description", placeholder="Short product description")
+            with c4:
+                volume = st.number_input("Volume Per Unit (m³)", min_value=0.1, value=1.0, step=0.1)
             
             submitted = st.form_submit_button("🚀 Add Product")
             
@@ -390,7 +398,8 @@ elif menu == "Products":
                         "name": name,
                         "description": description,
                         "unit_price": unit_price,
-                        "quantity_available": quantity
+                        "quantity_available": quantity,
+                        "volume_per_unit": volume
                     }
                     res = send_data("products/", payload)
                     if res and res.status_code == 200:
@@ -595,38 +604,84 @@ elif menu == "Shipments":
     tab1, tab2 = st.tabs(["➕ Create Shipment", "📋 Tracking & Management"])
     
     with tab1:
-        st.markdown("### Create New Shipment")
+        st.markdown("### 📦 Create Smart Shipment")
         
-        orders = fetch_data("orders/")
-        if not orders:
-            st.warning("⚠️ No orders available to ship.")
+        # Fetch pending orders
+        all_orders = fetch_data("orders/")
+        pending_orders = [o for o in all_orders if o.get('status') == 'Pending' or o.get('status') is None]
+        
+        if not pending_orders:
+            st.info("✅ No pending orders to ship.")
         else:
-            with st.form("shipment_form"):
-                c1, c2 = st.columns(2)
-                with c1:
-                    order_map = {f"Order #{o['order_id']} (Qty: {o['quantity_ordered']})": o['order_id'] for o in orders}
-                    selected_order = st.selectbox("Select Order", options=list(order_map.keys()))
-                    status = st.selectbox("Status", ["Pending", "In Transit", "Delivered", "Delayed"])
-                with c2:
-                    ship_date = st.date_input("Shipment Date", value=datetime.now())
-                    est_arrival = st.date_input("Estimated Arrival", value=datetime.now())
+            # Helper to display order info
+            def order_label(o):
+                return f"Order #{o['order_id']} | Vol: {o.get('total_volume', 'N/A')} | Supplier: {o['supplier_id']}"
+
+            selected_orders = st.multiselect(
+                "Select Orders to Consolidate",
+                options=pending_orders,
+                format_func=order_label
+            )
+
+            if selected_orders:
+                # Validation: Same Supplier
+                sup_ids = {o['supplier_id'] for o in selected_orders}
                 
-                submitted = st.form_submit_button("🚚 Dispatch Shipment")
-                
-                if submitted:
-                    payload = {
-                        "order_id": order_map[selected_order],
-                        "shipment_date": datetime.combine(ship_date, datetime.min.time()).isoformat(),
-                        "estimated_arrival_date": datetime.combine(est_arrival, datetime.min.time()).isoformat(),
-                        "status": status
-                    }
-                    res = send_data("shipments/", payload)
-                    if res and res.status_code == 200:
-                        show_success("Shipment created successfully!")
-                    elif res:
-                        show_error(f"Failed: {res.text}")
-                    else:
-                        show_error("Connection Failed")
+                if len(sup_ids) > 1:
+                    st.error("⚠️ Selected orders must be from the **SAME Supplier** to consolidate.")
+                else:
+                    # Calculate Stats
+                    total_vol = sum(float(o.get('total_volume', 0)) for o in selected_orders)
+                    sup_id = list(sup_ids)[0]
+                    
+                    # Fetch Supplier for Capacity
+                    supplier = fetch_data(f"suppliers/{sup_id}")
+                    min_cap = float(supplier.get('min_capacity', 50.0))
+                    
+                    # Progress Bar
+                    usage = min(total_vol / min_cap, 1.0)
+                    st.write(f"**Current Load:** {total_vol:.2f} / **Min Capacity:** {min_cap:.2f}")
+                    
+                    bar_color = "red" if total_vol < min_cap else "green"
+                    st.progress(usage, text=f"Efficiency: {int(usage*100)}%")
+                    
+                    if total_vol < min_cap:
+                        st.warning(f"⚠️ Load is under capacity ({min_cap}). Shipment will be queued as 'Waiting' unless Urgent.")
+
+                    with st.form("ship_create"):
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            priority = st.selectbox("Priority", ["normal", "urgent"])
+                            status = "Pending"
+                        with c2:
+                            ship_date = st.date_input("Shipment Date", value=datetime.now())
+                            est_arrival = st.date_input("Est. Arrival", value=datetime.now())
+                        
+                        if priority == "urgent" and total_vol < min_cap:
+                            st.error(f"⚡ URGENT override active. Extra charges will apply.")
+
+                        submitted = st.form_submit_button("� Create Shipment")
+                        
+                        if submitted:
+                            payload = {
+                                "order_ids": [o['order_id'] for o in selected_orders],
+                                "shipment_date": datetime.combine(ship_date, datetime.min.time()).isoformat(),
+                                "estimated_arrival_date": datetime.combine(est_arrival, datetime.min.time()).isoformat(),
+                                "status": "Pending", # Backend logic handles the real status
+                                "priority": priority
+                            }
+                            res = send_data("shipments/", payload)
+                            if res and res.status_code == 200:
+                                s_res = res.json()
+                                msg = f"Shipment Created! Status: {s_res.get('status')}"
+                                if s_res.get('extra_charge', 0) > 0:
+                                    msg += f" | Extra Charge: ${s_res['extra_charge']}"
+                                show_success(msg)
+                                st.rerun()
+                            elif res:
+                                show_error(f"Failed: {res.text}")
+                            else:
+                                show_error("Connection Failed")
 
     with tab2:
         st.markdown("### 📋 Tracking & Management")

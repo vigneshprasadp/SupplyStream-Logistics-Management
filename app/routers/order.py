@@ -18,11 +18,17 @@ def create_order(order: Ordercreate, db: Session = Depends(get_db)):
     product = db.query(Product).filter(Product.product_id == order.product_id).first()
     product.quantity_available -= order.quantity_ordered
     
+    # Calculate volume
+    vol_per_unit = float(product.volume_per_unit) if product.volume_per_unit else 1.0
+    tot_vol = vol_per_unit * order.quantity_ordered
+
     db_order = Order(
         product_id=order.product_id,
         supplier_id=order.supplier_id,
         order_date=order.order_date or datetime.utcnow(),
         quantity_ordered=order.quantity_ordered,
+        total_volume=tot_vol,
+        status="Pending"
     )
     db.add(db_order)
     db.commit()

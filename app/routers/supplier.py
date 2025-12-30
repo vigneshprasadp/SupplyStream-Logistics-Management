@@ -16,6 +16,7 @@ def create_supplier(supplier: Suppliercreate, db: Session = Depends(get_db)):
         address=supplier.address,
         contact_person=supplier.contact_person,
         phone_number=supplier.phone_number,
+        min_capacity=supplier.min_capacity or 50.0,
     )
     db.add(db_supplier)
     db.commit()

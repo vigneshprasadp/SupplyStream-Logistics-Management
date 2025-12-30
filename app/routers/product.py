@@ -15,6 +15,7 @@ def create_product(product: Productcreate, db: Session = Depends(get_db)):
         description=product.description,
         unit_price=product.unit_price,
         quantity_available=product.quantity_available,
+        volume_per_unit=product.volume_per_unit or 1.0,
     )
     db.add(db_product)
     db.commit()
